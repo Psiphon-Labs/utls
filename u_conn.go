@@ -565,6 +565,12 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 		return err
 	}
 
+	// [Psiphon]
+	// Client sent a session ticket or PSK.
+	if session != nil {
+		c.clientSentTicket = true
+	}
+
 	if hello.earlyData {
 		suite := cipherSuiteTLS13ByID(session.cipherSuite)
 		transcript := suite.hash.New()
