@@ -97,6 +97,9 @@ type clientHelloMsg struct {
 	pskBinders                       [][]byte
 	quicTransportParameters          []byte
 	encryptedClientHello             []byte
+
+	// [UTLS]
+	nextProtoNeg bool
 }
 
 func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
@@ -371,6 +374,11 @@ func (m *clientHelloMsg) marshalMsg(echInner bool) ([]byte, error) {
 }
 
 func (m *clientHelloMsg) marshal() ([]byte, error) {
+	// [UTLS SECTION BEGIN]
+	if m.original != nil {
+		return m.original, nil
+	}
+	// [UTLS SECTION END]
 	return m.marshalMsg(false)
 }
 
@@ -734,6 +742,10 @@ type serverHelloMsg struct {
 	// HelloRetryRequest extensions
 	cookie        []byte
 	selectedGroup CurveID
+
+	// [UTLS]
+	nextProtoNeg bool
+	nextProtos   []string
 }
 
 func (m *serverHelloMsg) marshal() ([]byte, error) {
@@ -998,6 +1010,9 @@ type encryptedExtensionsMsg struct {
 	quicTransportParameters []byte
 	earlyData               bool
 	echRetryConfigs         []byte
+
+	// [UTLS]
+	utls utlsEncryptedExtensionsMsgExtraFields
 }
 
 func (m *encryptedExtensionsMsg) marshal() ([]byte, error) {
@@ -1083,6 +1098,14 @@ func (m *encryptedExtensionsMsg) unmarshal(data []byte) bool {
 				return false
 			}
 		default:
+
+			// [UTLS SECTION BEGIN]
+			// TOOD! check understanding here
+			if !m.utlsUnmarshal(extension, extData) {
+				return false
+			}
+			// [UTLS SECTION END]
+
 			// Ignore unknown extensions.
 			continue
 		}

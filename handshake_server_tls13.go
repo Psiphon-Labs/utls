@@ -9,14 +9,15 @@ import (
 	"context"
 	"crypto"
 	"crypto/hmac"
-	"crypto/internal/mlkem768"
 	"crypto/rsa"
 	"errors"
 	"hash"
-	"internal/byteorder"
 	"io"
 	"slices"
 	"time"
+
+	"github.com/Psiphon-Labs/utls/byteorder"
+	"github.com/Psiphon-Labs/utls/internal/mlkem768"
 )
 
 // maxClientPSKIdentities is the number of client PSK identities the server will

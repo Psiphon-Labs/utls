@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"internal/godebug"
 	"io"
 	"net"
 	"sync"
@@ -45,8 +44,12 @@ type Conn struct {
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
-	handshakes       int
-	extMasterSecret  bool
+	handshakes      int
+	extMasterSecret bool
+
+	// [Psiphon]
+	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello
+
 	didResume        bool // whether this connection was a session resumption
 	didHRR           bool // whether a HelloRetryRequest was sent/received
 	cipherSuite      uint16
@@ -99,6 +102,8 @@ type Conn struct {
 
 	// clientProtocol is the negotiated ALPN protocol.
 	clientProtocol string
+
+	utls utlsConnExtraFields // [uTLS] used for extensive things such as ALPS, PSK, etc.
 
 	// input/output
 	in, out   halfConn
@@ -1157,13 +1162,22 @@ func (c *Conn) unmarshalHandshakeMessage(data []byte, transcript transcriptHash)
 		}
 	case typeFinished:
 		m = new(finishedMsg)
-	case typeEncryptedExtensions:
-		m = new(encryptedExtensionsMsg)
+	// [uTLS] Commented out typeEncryptedExtensions to force
+	// utlsHandshakeMessageType to handle it
+	// case typeEncryptedExtensions:
+	// m = new(encryptedExtensionsMsg)
 	case typeEndOfEarlyData:
 		m = new(endOfEarlyDataMsg)
 	case typeKeyUpdate:
 		m = new(keyUpdateMsg)
 	default:
+		// [UTLS SECTION BEGIN]
+		var err error
+		m, err = c.utlsHandshakeMessageType(data[0]) // see u_conn.go
+		if err == nil {
+			break
+		}
+		// [UTLS SECTION END]
 		return nil, c.in.setErrorLocked(c.sendAlert(alertUnexpectedMessage))
 	}
 
@@ -1608,6 +1622,16 @@ func (c *Conn) handshakeContext(ctx context.Context) (ret error) {
 	return c.handshakeErr
 }
 
+// [Psiphon]
+// ConnectionMetrics returns basic metrics about the connection.
+func (c *Conn) ConnectionMetrics() ConnectionMetrics {
+	c.handshakeMutex.Lock()
+	defer c.handshakeMutex.Unlock()
+	var metrics ConnectionMetrics
+	metrics.ClientSentTicket = c.clientSentTicket
+	return metrics
+}
+
 // ConnectionState returns basic TLS details about the connection.
 func (c *Conn) ConnectionState() ConnectionState {
 	c.handshakeMutex.Lock()
@@ -1615,7 +1639,7 @@ func (c *Conn) ConnectionState() ConnectionState {
 	return c.connectionStateLocked()
 }
 
-var tlsunsafeekm = godebug.New("tlsunsafeekm")
+// var tlsunsafeekm = godebug.New("tlsunsafeekm") // [UTLS] unsupported
 
 func (c *Conn) connectionStateLocked() ConnectionState {
 	var state ConnectionState
@@ -1644,16 +1668,22 @@ func (c *Conn) connectionStateLocked() ConnectionState {
 		state.ekm = noEKMBecauseRenegotiation
 	} else if c.vers != VersionTLS13 && !c.extMasterSecret {
 		state.ekm = func(label string, context []byte, length int) ([]byte, error) {
-			if tlsunsafeekm.Value() == "1" {
-				tlsunsafeekm.IncNonDefault()
-				return c.ekm(label, context, length)
-			}
+			// [UTLS SECTION BEGIN]
+			// Disable unsupported godebug package
+			// if tlsunsafeekm.Value() == "1" {
+			// 	tlsunsafeekm.IncNonDefault()
+			// 	return c.ekm(label, context, length)
+			// }
 			return noEKMBecauseNoEMS(label, context, length)
+			// [UTLS SECTION END]
 		}
 	} else {
 		state.ekm = c.ekm
 	}
 	state.ECHAccepted = c.echAccepted
+	// [UTLS SECTION BEGIN]
+	c.utlsConnectionStateLocked(&state)
+	// [UTLS SECTION END]
 	return state
 }
 

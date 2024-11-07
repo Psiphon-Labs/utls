@@ -18,7 +18,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"internal/byteorder"
 	"io"
 	"math/big"
 	"net"
@@ -31,6 +30,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/utls/byteorder"
 )
 
 // Note: see comment in handshake_test.go for details of how the reference

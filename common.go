@@ -18,7 +18,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"internal/godebug"
 	"io"
 	"net"
 	"slices"
@@ -155,6 +154,10 @@ const (
 	x25519Kyber768Draft00 CurveID = 0x6399 // X25519Kyber768Draft00
 )
 
+// [UTLS]
+// Export the experimental codepoint for X25519Kyber768Draft00.
+const X25519Kyber768Draft00 = x25519Kyber768Draft00
+
 // TLS 1.3 Key Share. See RFC 8446, Section 4.2.8.
 type keyShare struct {
 	group CurveID
@@ -226,6 +229,13 @@ const (
 // include downgrade canaries even if it's using its highers supported version.
 var testingOnlyForceDowngradeCanary bool
 
+// [Psiphon]
+type ConnectionMetrics struct {
+	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
+	// or a TLS 1.3 PSK in the ClientHello successfully.
+	ClientSentTicket bool
+}
+
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
 	// Version is the TLS version used by the connection (e.g. VersionTLS12).
@@ -249,6 +259,10 @@ type ConnectionState struct {
 	//
 	// Deprecated: this value is always true.
 	NegotiatedProtocolIsMutual bool
+
+	// PeerApplicationSettings is the Application-Layer Protocol Settings (ALPS)
+	// provided by peer.
+	PeerApplicationSettings []byte // [uTLS]
 
 	// ServerName is the value of the Server Name Indication extension sent by
 	// the client. It's available both on the server and on the client side.
@@ -296,6 +310,11 @@ type ConnectionState struct {
 
 	// ekm is a closure exposed via ExportKeyingMaterial.
 	ekm func(label string, context []byte, length int) ([]byte, error)
+
+	// ECHRetryConfigs contains the ECH retry configurations sent by the server in
+	// EncryptedExtensions message. It is only populated if the server sent the
+	// ech extension in EncryptedExtensions message.
+	ECHRetryConfigs []ECHConfig // [uTLS]
 
 	// testingOnlyDidHRR is true if a HelloRetryRequest was sent/received.
 	testingOnlyDidHRR bool
@@ -649,6 +668,10 @@ type Config struct {
 	// ConnectionState.NegotiatedProtocol will be empty.
 	NextProtos []string
 
+	// ApplicationSettings is a set of application settings (ALPS) to use
+	// with each application protocol (ALPN).
+	ApplicationSettings map[string][]byte // [uTLS]
+
 	// ServerName is used to verify the hostname on the returned
 	// certificates unless InsecureSkipVerify is given. It is also included
 	// in the client's handshake to support virtual hosting unless it is
@@ -671,6 +694,42 @@ type Config struct {
 	// attacks unless custom verification is used. This should be used only for
 	// testing or in combination with VerifyConnection or VerifyPeerCertificate.
 	InsecureSkipVerify bool
+
+	// InsecureSkipTimeVerify controls whether a client verifies the server's
+	// certificate chain against time. If InsecureSkipTimeVerify is true,
+	// crypto/tls accepts the certificate even when it is expired.
+	//
+	// This field is ignored when InsecureSkipVerify is true.
+	InsecureSkipTimeVerify bool // [uTLS]
+
+	// OmitEmptyPsk determines whether utls will automatically conceal
+	// the psk extension when it is empty. When the psk extension is empty, the
+	// browser omits it from the client hello. Utls can mimic this behavior,
+	// but it deviates from the provided client hello specification, rendering
+	// it unsuitable as the default behavior. Users have the option to enable
+	// this behavior at their own discretion.
+	OmitEmptyPsk bool // [uTLS]
+
+	// InsecureServerNameToVerify is used to verify the hostname on the returned
+	// certificates. It is intended to use with spoofed ServerName.
+	// If InsecureServerNameToVerify is "*", crypto/tls will do normal
+	// certificate validation but ignore certifacate's DNSName.
+	//
+	// This field is ignored when InsecureSkipVerify is true.
+	InsecureServerNameToVerify string // [uTLS]
+
+	// PreferSkipResumptionOnNilExtension controls the behavior when session resumption is enabled but the corresponding session extensions are nil.
+	//
+	// To successfully use session resumption, ensure that the following requirements are met:
+	//  - SessionTicketsDisabled is set to false
+	//  - ClientSessionCache is non-nil
+	//  - For TLS 1.2, SessionTicketExtension is non-nil
+	//  - For TLS 1.3, PreSharedKeyExtension is non-nil
+	//
+	// There may be cases where users enable session resumption (SessionTicketsDisabled: false && ClientSessionCache: non-nil), but they do not provide SessionTicketExtension or PreSharedKeyExtension in the ClientHelloSpec. This could be intentional or accidental.
+	//
+	// By default, utls throws an exception in such scenarios. Set this to true to skip the resumption and suppress the exception.
+	PreferSkipResumptionOnNilExtension bool // [uTLS]
 
 	// CipherSuites is a list of enabled TLS 1.0–1.2 cipher suites. The order of
 	// the list is ignored. Note that TLS 1.3 ciphersuites are not configurable.
@@ -830,6 +889,17 @@ type Config struct {
 	// autoSessionTicketKeys is like sessionTicketKeys but is owned by the
 	// auto-rotation logic. See Config.ticketKeys.
 	autoSessionTicketKeys []ticketKey
+
+	// ECHConfigs contains the ECH configurations to be used by the ECH
+	// extension if any.
+	// It could either be distributed by the server in EncryptedExtensions
+	// message or out-of-band.
+	//
+	// If ECHConfigs is nil and an ECH extension is present, GREASEd ECH
+	// extension will be sent.
+	//
+	// If GREASE ECH extension is present, this field will be ignored.
+	ECHConfigs []ECHConfig // [uTLS]
 }
 
 const (
@@ -910,6 +980,13 @@ func (c *Config) Clone() *Config {
 		EncryptedClientHelloRejectionVerify: c.EncryptedClientHelloRejectionVerify,
 		sessionTicketKeys:                   c.sessionTicketKeys,
 		autoSessionTicketKeys:               c.autoSessionTicketKeys,
+
+		ApplicationSettings:                c.ApplicationSettings,                // [uTLS]
+		InsecureSkipTimeVerify:             c.InsecureSkipTimeVerify,             // [uTLS]
+		OmitEmptyPsk:                       c.OmitEmptyPsk,                       // [uTLS]
+		InsecureServerNameToVerify:         c.InsecureServerNameToVerify,         // [uTLS]
+		PreferSkipResumptionOnNilExtension: c.PreferSkipResumptionOnNilExtension, // [uTLS]
+		ECHConfigs:                         c.ECHConfigs,                         // [uTLS]
 	}
 }
 
@@ -1083,7 +1160,7 @@ var supportedVersions = []uint16{
 const roleClient = true
 const roleServer = false
 
-var tls10server = godebug.New("tls10server")
+// var tls10server = godebug.New("tls10server")  // [uTLS] unsupported
 
 func (c *Config) supportedVersions(isClient bool) []uint16 {
 	versions := make([]uint16, 0, len(supportedVersions))
@@ -1092,9 +1169,15 @@ func (c *Config) supportedVersions(isClient bool) []uint16 {
 			continue
 		}
 		if (c == nil || c.MinVersion == 0) && v < VersionTLS12 {
-			if isClient || tls10server.Value() != "1" {
+			// [uTLS SECTION BEGIN]
+			// Disabe unsupported godebug package
+			// if isClient || tls10server.Value() != "1" {
+			// 	continue
+			// }
+			if isClient {
 				continue
 			}
+			// [uTLS SECTION END]
 		}
 		if isClient && c.EncryptedClientHelloConfigList != nil && v < VersionTLS13 {
 			continue

@@ -6,12 +6,13 @@ package tls
 
 import (
 	"bytes"
-	"crypto/internal/mlkem768"
 	"encoding/hex"
 	"hash"
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/Psiphon-Labs/utls/internal/mlkem768"
 )
 
 // This file contains tests derived from draft-ietf-tls-tls13-vectors-07.

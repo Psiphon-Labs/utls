@@ -15,9 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"internal/byteorder"
 	"io"
 	"time"
+
+	"github.com/Psiphon-Labs/utls/byteorder"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
@@ -169,10 +170,13 @@ func (c *Conn) readClientHello(ctx context.Context) (*clientHelloMsg, error) {
 	c.in.version = c.vers
 	c.out.version = c.vers
 
-	if c.config.MinVersion == 0 && c.vers < VersionTLS12 {
-		tls10server.Value() // ensure godebug is initialized
-		tls10server.IncNonDefault()
-	}
+	// [UTLS SECTION BEGING]
+	// Disable unsupported godebug package
+	// if c.config.MinVersion == 0 && c.vers < VersionTLS12 {
+	// 	tls10server.Value() // ensure godebug is initialized
+	// 	tls10server.IncNonDefault()
+	// }
+	// [UTLS SECTION END]
 
 	return clientHello, nil
 }
@@ -372,14 +376,18 @@ func (hs *serverHandshakeState) pickCipherSuite() error {
 	}
 	c.cipherSuite = hs.suite.id
 
-	if c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
-		tlsrsakex.Value() // ensure godebug is initialized
-		tlsrsakex.IncNonDefault()
-	}
-	if c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
-		tls3des.Value() // ensure godebug is initialized
-		tls3des.IncNonDefault()
-	}
+	// [UTLS SECTION BEGIN]
+	// Disable unsupported godebug package
+	// if c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
+	// 	tlsrsakex.Value() // ensure godebug is initialized
+	// 	tlsrsakex.IncNonDefault()
+	// }
+	//
+	// if c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
+	// 	tls3des.Value() // ensure godebug is initialized
+	// 	tls3des.IncNonDefault()
+	// }
+	// [UTLS SECTION END]
 
 	for _, id := range hs.clientHello.cipherSuites {
 		if id == TLS_FALLBACK_SCSV {

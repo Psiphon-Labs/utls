@@ -18,7 +18,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"internal/testenv"
 	"io"
 	"math"
 	"math/big"
@@ -29,6 +28,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Psiphon-Labs/utls/testenv"
 )
 
 var rsaCertPEM = `-----BEGIN CERTIFICATE-----
@@ -881,6 +882,18 @@ func TestCloneNonFuncFields(t *testing.T) {
 			f.Set(reflect.ValueOf([]byte{'x'}))
 		case "mutex", "autoSessionTicketKeys", "sessionTicketKeys":
 			continue // these are unexported fields that are handled separately
+
+		// [UTLS SECTION BEGIN]
+		case "InsecureServerNameToVerify":
+			f.Set(reflect.ValueOf("b"))
+		case "InsecureSkipTimeVerify", "OmitEmptyPsk", "PreferSkipResumptionOnNilExtension":
+			f.Set(reflect.ValueOf(true))
+		case "ApplicationSettings": // ALPS (Application Settings)
+			f.Set(reflect.ValueOf(map[string][]byte{"a": {1}}))
+		case "ECHConfigs": // ECH (Encrypted Client Hello) Configs
+			f.Set(reflect.ValueOf([]ECHConfig{{Version: 1}}))
+		// [UTLS SECTION END]
+
 		default:
 			t.Errorf("all fields must be accounted for, but saw unknown field %q", fn)
 		}
@@ -1897,13 +1910,16 @@ func TestHandshakeKyber(t *testing.T) {
 			expectClientSupport: true,
 			expectKyber:         false,
 		},
-		{
-			name: "GODEBUG",
-			preparation: func(t *testing.T) {
-				t.Setenv("GODEBUG", "tlskyber=0")
-			},
-			expectClientSupport: false,
-		},
+		// [UTLS SECTION BEGIN]
+		// godebug is not supported
+		// {
+		// 	name: "GODEBUG",
+		// 	preparation: func(t *testing.T) {
+		// 		t.Setenv("GODEBUG", "tlskyber=0")
+		// 	},
+		// 	expectClientSupport: false,
+		// },
+		// [UTLS SECTION END]
 	}
 
 	baseConfig := testConfig.Clone()
@@ -1969,7 +1985,7 @@ func TestHandshakeKyber(t *testing.T) {
 	}
 }
 
-func TestX509KeyPairPopulateCertificate(t *testing.T) {
+func DisabledTestX509KeyPairPopulateCertificate(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

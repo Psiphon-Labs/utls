@@ -194,7 +194,7 @@ func checkUTLSFingerPrintClientHello(t *testing.T, clientHelloID ClientHelloID, 
 	generatedUConn := UClient(&net.TCPConn{}, &Config{ServerName: "foobar"}, HelloCustom)
 	fingerprinter := &Fingerprinter{}
 	minTLSVers := createMinTLSVersion(uconn.vers)
-	generatedSpec, err := fingerprinter.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Raw, minTLSVers))
+	generatedSpec, err := fingerprinter.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Original, minTLSVers))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -205,8 +205,8 @@ func checkUTLSFingerPrintClientHello(t *testing.T, clientHelloID ClientHelloID, 
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
 
-	if len(uconn.HandshakeState.Hello.Raw) != len(generatedUConn.HandshakeState.Hello.Raw) {
-		t.Errorf("UConn from fingerprint has %d length, should have %d", len(generatedUConn.HandshakeState.Hello.Raw), len(uconn.HandshakeState.Hello.Raw))
+	if len(uconn.HandshakeState.Hello.Original) != len(generatedUConn.HandshakeState.Hello.Original) {
+		t.Errorf("UConn from fingerprint has %d length, should have %d", len(generatedUConn.HandshakeState.Hello.Original), len(uconn.HandshakeState.Hello.Original))
 	}
 
 	// We can't effectively check the extensions on randomized client hello ids
@@ -269,13 +269,13 @@ func TestUTLSFingerprintClientHelloBluntMimicry(t *testing.T) {
 
 	f := &Fingerprinter{}
 	minTLSVers := createMinTLSVersion(uconn.vers)
-	_, err = f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Raw, minTLSVers))
+	_, err = f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Original, minTLSVers))
 	if err == nil {
 		t.Errorf("expected error generating spec from client hello with GenericExtension")
 	}
 
 	f = &Fingerprinter{AllowBluntMimicry: true}
-	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Raw, minTLSVers))
+	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Original, minTLSVers))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -321,7 +321,7 @@ func TestUTLSFingerprintClientHelloAlwaysAddPadding(t *testing.T) {
 
 	f := &Fingerprinter{}
 	minTLSVersWithoutPadding := createMinTLSVersion(uconnWithoutPadding.vers)
-	fingerprintedWithoutPadding, err := f.FingerprintClientHello(prependRecordHeader(uconnWithoutPadding.HandshakeState.Hello.Raw, minTLSVersWithoutPadding))
+	fingerprintedWithoutPadding, err := f.FingerprintClientHello(prependRecordHeader(uconnWithoutPadding.HandshakeState.Hello.Original, minTLSVersWithoutPadding))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -334,7 +334,7 @@ func TestUTLSFingerprintClientHelloAlwaysAddPadding(t *testing.T) {
 	}
 
 	f = &Fingerprinter{AlwaysAddPadding: true}
-	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconnWithoutPadding.HandshakeState.Hello.Raw, minTLSVersWithoutPadding))
+	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconnWithoutPadding.HandshakeState.Hello.Original, minTLSVersWithoutPadding))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -352,7 +352,7 @@ func TestUTLSFingerprintClientHelloAlwaysAddPadding(t *testing.T) {
 
 	f = &Fingerprinter{AlwaysAddPadding: true}
 	minTLSVersWithPadding := createMinTLSVersion(uconnWithPadding.vers)
-	generatedSpec, err = f.FingerprintClientHello(prependRecordHeader(uconnWithPadding.HandshakeState.Hello.Raw, minTLSVersWithPadding))
+	generatedSpec, err = f.FingerprintClientHello(prependRecordHeader(uconnWithPadding.HandshakeState.Hello.Original, minTLSVersWithPadding))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -527,7 +527,7 @@ func TestUTLSHandshakeClientFingerprintedSpecFromChrome_58(t *testing.T) {
 
 	f := &Fingerprinter{}
 	minTLSVers := createMinTLSVersion(uconn.vers)
-	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Raw, minTLSVers))
+	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Original, minTLSVers))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}
@@ -563,7 +563,7 @@ func TestUTLSHandshakeClientFingerprintedSpecFromChrome_70(t *testing.T) {
 
 	f := &Fingerprinter{}
 	minTLSVers := createMinTLSVersion(uconn.vers)
-	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Raw, minTLSVers))
+	generatedSpec, err := f.FingerprintClientHello(prependRecordHeader(uconn.HandshakeState.Hello.Original, minTLSVers))
 	if err != nil {
 		t.Errorf("got error: %v; expected to succeed", err)
 	}

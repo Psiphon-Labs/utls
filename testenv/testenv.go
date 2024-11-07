@@ -15,9 +15,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"internal/cfg"
-	"internal/goarch"
-	"internal/platform"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +24,124 @@ import (
 	"sync"
 	"testing"
 )
+
+// [UTLS SECTION BEGIN]
+// From internal/cfg/cfg.go
+// KnownEnv is a list of environment variables that affect the operation
+// of the Go command.
+const KnownEnv = `
+	AR
+	CC
+	CGO_CFLAGS
+	CGO_CFLAGS_ALLOW
+	CGO_CFLAGS_DISALLOW
+	CGO_CPPFLAGS
+	CGO_CPPFLAGS_ALLOW
+	CGO_CPPFLAGS_DISALLOW
+	CGO_CXXFLAGS
+	CGO_CXXFLAGS_ALLOW
+	CGO_CXXFLAGS_DISALLOW
+	CGO_ENABLED
+	CGO_FFLAGS
+	CGO_FFLAGS_ALLOW
+	CGO_FFLAGS_DISALLOW
+	CGO_LDFLAGS
+	CGO_LDFLAGS_ALLOW
+	CGO_LDFLAGS_DISALLOW
+	CXX
+	FC
+	GCCGO
+	GO111MODULE
+	GO386
+	GOAMD64
+	GOARCH
+	GOARM
+	GOARM64
+	GOBIN
+	GOCACHE
+	GOCACHEPROG
+	GOENV
+	GOEXE
+	GOEXPERIMENT
+	GOFLAGS
+	GOGCCFLAGS
+	GOHOSTARCH
+	GOHOSTOS
+	GOINSECURE
+	GOMIPS
+	GOMIPS64
+	GOMODCACHE
+	GONOPROXY
+	GONOSUMDB
+	GOOS
+	GOPATH
+	GOPPC64
+	GOPRIVATE
+	GOPROXY
+	GORISCV64
+	GOROOT
+	GOSUMDB
+	GOTMPDIR
+	GOTOOLCHAIN
+	GOTOOLDIR
+	GOVCS
+	GOWASM
+	GOWORK
+	GO_EXTLINK_ENABLED
+	PKG_CONFIG
+`
+
+// [UTLS SECTION END]
+
+// [UTLS SECTION BEGIN]
+// From internal/platform/supported.go
+// MustLinkExternal reports whether goos/goarch requires external linking
+// with or without cgo dependencies.
+func MustLinkExternal(goos, goarch string, withCgo bool) bool {
+	if withCgo {
+		switch goarch {
+		case "loong64", "mips", "mipsle", "mips64", "mips64le":
+			// Internally linking cgo is incomplete on some architectures.
+			// https://go.dev/issue/14449
+			return true
+		case "arm64":
+			if goos == "windows" {
+				// windows/arm64 internal linking is not implemented.
+				return true
+			}
+		case "ppc64":
+			// Big Endian PPC64 cgo internal linking is not implemented for aix or linux.
+			// https://go.dev/issue/8912
+			if goos == "aix" || goos == "linux" {
+				return true
+			}
+		}
+
+		switch goos {
+		case "android":
+			return true
+		case "dragonfly":
+			// It seems that on Dragonfly thread local storage is
+			// set up by the dynamic linker, so internal cgo linking
+			// doesn't work. Test case is "go test runtime/cgo".
+			return true
+		}
+	}
+
+	switch goos {
+	case "android":
+		if goarch != "arm64" {
+			return true
+		}
+	case "ios":
+		if goarch == "arm64" {
+			return true
+		}
+	}
+	return false
+}
+
+// [UTLS SECTION END]
 
 // Save the original environment during init for use in checks. A test
 // binary may modify its environment before calling HasExec to change its
@@ -76,7 +191,10 @@ func HasGoBuild() bool {
 			return
 		}
 
-		if platform.MustLinkExternal(runtime.GOOS, runtime.GOARCH, false) {
+		// [UTLS SECTION BEGIN]
+		// if platform.MustLinkExternal(runtime.GOOS, runtime.GOARCH, false) {
+		if MustLinkExternal(runtime.GOOS, runtime.GOARCH, false) {
+			// [UTLS SECTION END]
 			// We can assume that we always have a complete Go toolchain available.
 			// However, this platform requires a C linker to build even pure Go
 			// programs, including tests. Do we have one in the test environment?
@@ -171,7 +289,10 @@ func GoToolPath(t testing.TB) string {
 	// Add all environment variables that affect the Go command to test metadata.
 	// Cached test results will be invalidate when these variables change.
 	// See golang.org/issue/32285.
-	for _, envVar := range strings.Fields(cfg.KnownEnv) {
+	// [UTLS SECTION BEGIN]
+	// for _, envVar := range strings.Fields(cfg.KnownEnv) {
+	for _, envVar := range strings.Fields(KnownEnv) {
+		// [UTLS SECTION END]
 		os.Getenv(envVar)
 	}
 	return path
@@ -355,7 +476,10 @@ func MustHaveCGO(t testing.TB) {
 // CanInternalLink reports whether the current system can link programs with
 // internal linking.
 func CanInternalLink(withCgo bool) bool {
-	return !platform.MustLinkExternal(runtime.GOOS, runtime.GOARCH, withCgo)
+	// [UTLS SECTION BEGIN]
+	// return !platform.MustLinkExternal(runtime.GOOS, runtime.GOARCH, withCgo)
+	return !MustLinkExternal(runtime.GOOS, runtime.GOARCH, withCgo)
+	// [UTLS SECTION END]
 }
 
 // MustInternalLink checks that the current system can link programs with internal
@@ -370,23 +494,25 @@ func MustInternalLink(t testing.TB, withCgo bool) {
 	}
 }
 
-// MustInternalLinkPIE checks whether the current system can link PIE binary using
-// internal linking.
-// If not, MustInternalLinkPIE calls t.Skip with an explanation.
-func MustInternalLinkPIE(t testing.TB) {
-	if !platform.InternalLinkPIESupported(runtime.GOOS, runtime.GOARCH) {
-		t.Skipf("skipping test: internal linking for buildmode=pie on %s/%s is not supported", runtime.GOOS, runtime.GOARCH)
-	}
-}
+// [UTLS] Commented out unused functions.
+// // MustInternalLinkPIE checks whether the current system can link PIE binary using
+// // internal linking.
+// // If not, MustInternalLinkPIE calls t.Skip with an explanation.
+// func MustInternalLinkPIE(t testing.TB) {
+// 	if !platform.InternalLinkPIESupported(runtime.GOOS, runtime.GOARCH) {
+// 		t.Skipf("skipping test: internal linking for buildmode=pie on %s/%s is not supported", runtime.GOOS, runtime.GOARCH)
+// 	}
+// }
 
-// MustHaveBuildMode reports whether the current system can build programs in
-// the given build mode.
-// If not, MustHaveBuildMode calls t.Skip with an explanation.
-func MustHaveBuildMode(t testing.TB, buildmode string) {
-	if !platform.BuildModeSupported(runtime.Compiler, buildmode, runtime.GOOS, runtime.GOARCH) {
-		t.Skipf("skipping test: build mode %s on %s/%s is not supported by the %s compiler", buildmode, runtime.GOOS, runtime.GOARCH, runtime.Compiler)
-	}
-}
+// [UTLS] Commented out unused functions.
+// // MustHaveBuildMode reports whether the current system can build programs in
+// // the given build mode.
+// // If not, MustHaveBuildMode calls t.Skip with an explanation.
+// func MustHaveBuildMode(t testing.TB, buildmode string) {
+// 	if !platform.BuildModeSupported(runtime.Compiler, buildmode, runtime.GOOS, runtime.GOARCH) {
+// 		t.Skipf("skipping test: build mode %s on %s/%s is not supported by the %s compiler", buildmode, runtime.GOOS, runtime.GOARCH, runtime.Compiler)
+// 	}
+// }
 
 // HasSymlink reports whether the current system can use os.Symlink.
 func HasSymlink() bool {
@@ -513,12 +639,13 @@ func SyscallIsNotSupported(err error) bool {
 	return syscallIsNotSupported(err)
 }
 
-// ParallelOn64Bit calls t.Parallel() unless there is a case that cannot be parallel.
-// This function should be used when it is necessary to avoid t.Parallel on
-// 32-bit machines, typically because the test uses lots of memory.
-func ParallelOn64Bit(t *testing.T) {
-	if goarch.PtrSize == 4 {
-		return
-	}
-	t.Parallel()
-}
+// [UTLS] Commented out unused functions.
+// // ParallelOn64Bit calls t.Parallel() unless there is a case that cannot be parallel.
+// // This function should be used when it is necessary to avoid t.Parallel on
+// // 32-bit machines, typically because the test uses lots of memory.
+// func ParallelOn64Bit(t *testing.T) {
+// 	if goarch.PtrSize == 4 {
+// 		return
+// 	}
+// 	t.Parallel()
+// }

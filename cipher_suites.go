@@ -10,17 +10,18 @@ import (
 	"crypto/cipher"
 	"crypto/des"
 	"crypto/hmac"
-	"crypto/internal/boring"
 	"crypto/rc4"
 	"crypto/sha1"
 	"crypto/sha256"
 	"fmt"
 	"hash"
-	"internal/cpu"
 	"runtime"
 	_ "unsafe" // for linkname
 
+	"github.com/Psiphon-Labs/utls/internal/boring"
+
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/sys/cpu"
 )
 
 // CipherSuite is a TLS cipher suite. Note that most functions in this package
@@ -643,7 +644,7 @@ func mutualCipherSuite(have []uint16, want uint16) *cipherSuite {
 }
 
 func cipherSuiteByID(id uint16) *cipherSuite {
-	for _, cipherSuite := range cipherSuites {
+	for _, cipherSuite := range utlsSupportedCipherSuites {
 		if cipherSuite.id == id {
 			return cipherSuite
 		}

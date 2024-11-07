@@ -7,7 +7,6 @@ package tls
 import (
 	"crypto/ecdh"
 	"crypto/hmac"
-	"crypto/internal/mlkem768"
 	"errors"
 	"fmt"
 	"hash"
@@ -16,6 +15,8 @@ import (
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/Psiphon-Labs/utls/internal/mlkem768"
 )
 
 // This file contains the functions necessary to compute the TLS 1.3 key
@@ -119,11 +120,58 @@ func (c *cipherSuiteTLS13) exportKeyingMaterial(masterSecret []byte, transcript 
 	}
 }
 
+// [UTLS SECTION BEGIN]
+// The standard crypto/tls library only allows for a single curve to be used.
+// We need to support multiple curves to parrot TLS profiles such as Firefox.
+//
+//	type keySharePrivateKeys struct {
+//		curveID CurveID
+//		ecdhe   *ecdh.PrivateKey
+//		kyber   *mlkem768.DecapsulationKey
+//	}
 type keySharePrivateKeys struct {
-	curveID CurveID
-	ecdhe   *ecdh.PrivateKey
-	kyber   *mlkem768.DecapsulationKey
+	ecdhe map[CurveID]*ecdh.PrivateKey
+	kyber map[CurveID]*mlkem768.DecapsulationKey
 }
+
+func NewKeySharePrivateKeys() *keySharePrivateKeys {
+	return &keySharePrivateKeys{
+		ecdhe: make(map[CurveID]*ecdh.PrivateKey),
+		kyber: make(map[CurveID]*mlkem768.DecapsulationKey),
+	}
+}
+
+func (ks *keySharePrivateKeys) getEcdheKey(curveID CurveID) (*ecdh.PrivateKey, error) {
+	if ks.ecdhe == nil {
+		return nil, errors.New("tls: keySharePrivateKeys not initialized")
+	}
+	return ks.ecdhe[curveID], nil
+}
+
+func (ks *keySharePrivateKeys) setEcdheKey(curveID CurveID, key *ecdh.PrivateKey) error {
+	if ks.ecdhe == nil {
+		return errors.New("tls: keySharePrivateKeys not initialized")
+	}
+	ks.ecdhe[curveID] = key
+	return nil
+}
+
+func (ks *keySharePrivateKeys) getKyberKey(curveID CurveID) (*mlkem768.DecapsulationKey, error) {
+	if ks.kyber == nil {
+		return nil, errors.New("tls: keySharePrivateKeys not initialized")
+	}
+	return ks.kyber[curveID], nil
+}
+
+func (ks *keySharePrivateKeys) setKyberKey(curveID CurveID, key *mlkem768.DecapsulationKey) error {
+	if ks.kyber == nil {
+		return errors.New("tls: keySharePrivateKeys not initialized")
+	}
+	ks.kyber[curveID] = key
+	return nil
+}
+
+// [UTLS SECTION END]
 
 // kyberDecapsulate implements decapsulation according to Kyber Round 3.
 func kyberDecapsulate(dk *mlkem768.DecapsulationKey, c []byte) ([]byte, error) {

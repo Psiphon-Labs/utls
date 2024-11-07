@@ -494,6 +494,15 @@ func (*certificateMsgTLS13) Generate(rand *rand.Rand, size int) reflect.Value {
 	return reflect.ValueOf(m)
 }
 
+// [UTLS]
+func (*utlsCompressedCertificateMsg) Generate(rand *rand.Rand, size int) reflect.Value {
+	m := &utlsCompressedCertificateMsg{}
+	m.algorithm = uint16(rand.Intn(2 << 15))
+	m.uncompressedLength = uint32(rand.Intn(2 << 23))
+	m.compressedCertificateMessage = randomBytes(rand.Intn(500)+1, rand)
+	return reflect.ValueOf(m)
+}
+
 func TestRejectEmptySCTList(t *testing.T) {
 	// RFC 6962, Section 3.3.1 specifies that empty SCT lists are invalid.
 

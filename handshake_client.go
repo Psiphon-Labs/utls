@@ -10,21 +10,20 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/internal/hpke"
-	"crypto/internal/mlkem768"
 	"crypto/rsa"
 	"crypto/subtle"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"hash"
-	"internal/byteorder"
-	"internal/godebug"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Psiphon-Labs/utls/byteorder"
+	"github.com/Psiphon-Labs/utls/internal/hpke"
+	"github.com/Psiphon-Labs/utls/internal/mlkem768"
 )
 
 type clientHandshakeState struct {
@@ -37,15 +36,23 @@ type clientHandshakeState struct {
 	masterSecret []byte
 	session      *SessionState // the session being resumed
 	ticket       []byte        // a fresh ticket received during this handshake
+
+	uconn *UConn // [UTLS]
 }
 
 var testingOnlyForceClientHelloSignatureAlgorithms []SignatureScheme
 
 func (c *Conn) makeClientHello() (*clientHelloMsg, *keySharePrivateKeys, *echContext, error) {
 	config := c.config
-	if len(config.ServerName) == 0 && !config.InsecureSkipVerify {
-		return nil, nil, nil, errors.New("tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config")
+
+	// [UTLS SECTION START]
+	// if len(config.ServerName) == 0 && !config.InsecureSkipVerify {
+	// 	return nil, nil, nil, errors.New("tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config")
+	// }
+	if len(config.ServerName) == 0 && !config.InsecureSkipVerify && len(config.InsecureServerNameToVerify) == 0 {
+		return nil, nil, nil, errors.New("tls: at least one of ServerName, InsecureSkipVerify or InsecureServerNameToVerify must be specified in the tls.Config")
 	}
+	// [UTLS SECTION END]
 
 	nextProtosLength := 0
 	for _, proto := range config.NextProtos {
@@ -148,38 +155,83 @@ func (c *Conn) makeClientHello() (*clientHelloMsg, *keySharePrivateKeys, *echCon
 		}
 
 		curveID := config.curvePreferences(maxVersion)[0]
-		keyShareKeys = &keySharePrivateKeys{curveID: curveID}
+
+		// [UTLS SECTION BEGIN]
+		// keyShareKeys type has been modified to allow for more than one curve.
+		// The (key share) changes to below are to accommodate this change.
+		// keyShareKeys = &keySharePrivateKeys{curveID: curveID}
+		keyShareKeys = NewKeySharePrivateKeys()
+		// [UTLS SECTION END]
+
 		if curveID == x25519Kyber768Draft00 {
-			keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), X25519)
+			// [UTLS SECTION BEGIN]
+			// keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), X25519)
+			ecdheKey, err := generateECDHEKey(config.rand(), X25519)
+			// [UTLS SECTION END]
 			if err != nil {
 				return nil, nil, nil, err
 			}
+
+			// [UTLS SECTION BEGIN]
+			// UTLS changes to keyShareKeys explicitly specify the curveID for the key shares.
+			// Therefore, we need to set the (reused) ecdheKey for both standard X25519
+			// and the hybrid x25519Kyber768Draft00.
+			if err := keyShareKeys.setEcdheKey(X25519, ecdheKey); err != nil {
+				return nil, nil, nil, err
+			}
+			if err := keyShareKeys.setEcdheKey(curveID, ecdheKey); err != nil {
+				return nil, nil, nil, err
+			}
+			// [UTLS SECTION END]
+
 			seed := make([]byte, mlkem768.SeedSize)
 			if _, err := io.ReadFull(config.rand(), seed); err != nil {
 				return nil, nil, nil, err
 			}
-			keyShareKeys.kyber, err = mlkem768.NewKeyFromSeed(seed)
+			// [UTLS SECTION BEGIN]
+			// keyShareKeys.kyber, err = mlkem768.NewKeyFromSeed(seed)
+			kyberKey, err := mlkem768.NewKeyFromSeed(seed)
 			if err != nil {
 				return nil, nil, nil, err
 			}
+			if err := keyShareKeys.setKyberKey(curveID, kyberKey); err != nil {
+				return nil, nil, nil, err
+			}
+			// [UTLS SECTION END]
+
 			// For draft-tls-westerbaan-xyber768d00-03, we send both a hybrid
 			// and a standard X25519 key share, since most servers will only
 			// support the latter. We reuse the same X25519 ephemeral key for
 			// both, as allowed by draft-ietf-tls-hybrid-design-09, Section 3.2.
+
+			// [UTLS SECTION BEGIN]
+			// hello.keyShares = []keyShare{
+			// 	{group: x25519Kyber768Draft00, data: append(keyShareKeys.ecdhe.PublicKey().Bytes(),
+			// 		keyShareKeys.kyber.EncapsulationKey()...)},
+			// 	{group: X25519, data: keyShareKeys.ecdhe.PublicKey().Bytes()},
+			// }
 			hello.keyShares = []keyShare{
-				{group: x25519Kyber768Draft00, data: append(keyShareKeys.ecdhe.PublicKey().Bytes(),
-					keyShareKeys.kyber.EncapsulationKey()...)},
-				{group: X25519, data: keyShareKeys.ecdhe.PublicKey().Bytes()},
+				{group: x25519Kyber768Draft00, data: append(keyShareKeys.ecdhe[curveID].PublicKey().Bytes(),
+					keyShareKeys.kyber[curveID].EncapsulationKey()...)},
+				{group: X25519, data: keyShareKeys.ecdhe[X25519].PublicKey().Bytes()},
 			}
+			// [UTLS SECTION END]
 		} else {
 			if _, ok := curveForCurveID(curveID); !ok {
 				return nil, nil, nil, errors.New("tls: CurvePreferences includes unsupported curve")
 			}
-			keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), curveID)
+
+			// [UTLS SECTION BEGIN]
+			// keyShareKeys.ecdhe, err = generateECDHEKey(config.rand(), curveID)
+			keyShareKeys.ecdhe[curveID], err = generateECDHEKey(config.rand(), curveID)
+			// [UTLS SECTION END]
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe.PublicKey().Bytes()}}
+			// [UTLS SECTION BEGIN]
+			// hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe.PublicKey().Bytes()}}
+			hello.keyShares = []keyShare{{group: curveID, data: keyShareKeys.ecdhe[curveID].PublicKey().Bytes()}}
+			// [UTLS SECTION END]
 		}
 	}
 
@@ -378,6 +430,13 @@ func (c *Conn) clientHandshake(ctx context.Context) (err error) {
 
 func (c *Conn) loadSession(hello *clientHelloMsg) (
 	session *SessionState, earlySecret, binderKey []byte, err error) {
+	// [UTLS SECTION BEGIN]
+	if c.utls.sessionController != nil {
+		c.utls.sessionController.onEnterLoadSessionCheck()
+		defer c.utls.sessionController.onLoadSessionReturn()
+	}
+	// [UTLS SECTION END]
+
 	if c.config.SessionTicketsDisabled || c.config.ClientSessionCache == nil {
 		return nil, nil, nil, nil
 	}
@@ -427,19 +486,34 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	// Check that the cached server certificate is not expired, and that it's
 	// valid for the ServerName. This should be ensured by the cache key, but
 	// protect the application from a faulty ClientSessionCache implementation.
-	if c.config.time().After(session.peerCertificates[0].NotAfter) {
-		// Expired certificate, delete the entry.
-		c.config.ClientSessionCache.Put(cacheKey, nil)
-		return nil, nil, nil, nil
+
+	if !c.config.InsecureSkipTimeVerify { //  [UTLS]
+		if c.config.time().After(session.peerCertificates[0].NotAfter) {
+			// Expired certificate, delete the entry.
+			c.config.ClientSessionCache.Put(cacheKey, nil)
+			return nil, nil, nil, nil
+		}
 	}
+
 	if !c.config.InsecureSkipVerify {
 		if len(session.verifiedChains) == 0 {
 			// The original connection had InsecureSkipVerify, while this doesn't.
 			return nil, nil, nil, nil
 		}
-		if err := session.peerCertificates[0].VerifyHostname(c.config.ServerName); err != nil {
-			return nil, nil, nil, nil
+
+		// [UTLS SECTION START]
+		var dnsName string
+		if len(c.config.InsecureServerNameToVerify) == 0 {
+			dnsName = c.config.ServerName
+		} else if c.config.InsecureServerNameToVerify != "*" {
+			dnsName = c.config.InsecureServerNameToVerify
 		}
+		if len(dnsName) > 0 {
+			if err := session.peerCertificates[0].VerifyHostname(dnsName); err != nil {
+				return nil, nil, nil, nil
+			}
+		}
+		// [UTLS SECTION END]
 	}
 
 	if session.version != VersionTLS13 {
@@ -506,6 +580,13 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	// Compute the PSK binders. See RFC 8446, Section 4.2.11.2.
 	earlySecret = cipherSuite.extract(session.secret, nil)
 	binderKey = cipherSuite.deriveSecret(earlySecret, resumptionBinderLabel, nil)
+
+	// [UTLS SECTION START]
+	if c.utls.sessionController != nil && !c.utls.sessionController.shouldLoadSessionWriteBinders() {
+		return
+	}
+	// [UTLS SECTION END]
+
 	transcript := cipherSuite.hash.New()
 	if err := computeAndUpdatePSK(hello, binderKey, transcript, cipherSuite.finishedHash); err != nil {
 		return nil, nil, nil, err
@@ -626,14 +707,17 @@ func (hs *clientHandshakeState) pickCipherSuite() error {
 		return errors.New("tls: server chose an unconfigured cipher suite")
 	}
 
-	if hs.c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
-		tlsrsakex.Value() // ensure godebug is initialized
-		tlsrsakex.IncNonDefault()
-	}
-	if hs.c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
-		tls3des.Value() // ensure godebug is initialized
-		tls3des.IncNonDefault()
-	}
+	// [UTLS SECTION BEGIN]
+	// Disable unsupported godebug packages
+	// if hs.c.config.CipherSuites == nil && !needFIPS() && rsaKexCiphers[hs.suite.id] {
+	// 	tlsrsakex.Value() // ensure godebug is initialized
+	// 	tlsrsakex.IncNonDefault()
+	// }
+	// if hs.c.config.CipherSuites == nil && !needFIPS() && tdesCiphers[hs.suite.id] {
+	// 	tls3des.Value() // ensure godebug is initialized
+	// 	tls3des.IncNonDefault()
+	// }
+	// [UTLS SECTION END]
 
 	hs.c.cipherSuite = hs.suite.id
 	return nil
@@ -1028,7 +1112,16 @@ func (hs *clientHandshakeState) saveSessionTicket() error {
 	session.ticket = hs.ticket
 
 	cs := &ClientSessionState{session: session}
-	c.config.ClientSessionCache.Put(cacheKey, cs)
+
+	// [UTLS SECTION BEGIN]
+	// By skipping saving to ClientSessionCache when it is not set in the Config,
+	// it allows TLS 1.2 connections to be established while client actively advertises
+	// session_ticket extension, without modifying configs from previous tagged versions.
+	if c.config.ClientSessionCache != nil {
+		c.config.ClientSessionCache.Put(cacheKey, cs)
+	}
+	// [UTLS SECTION END]
+
 	return nil
 }
 
@@ -1052,17 +1145,20 @@ func (hs *clientHandshakeState) sendFinished(out []byte) error {
 // to verify the signatures of during a TLS handshake.
 const defaultMaxRSAKeySize = 8192
 
-var tlsmaxrsasize = godebug.New("tlsmaxrsasize")
+// var tlsmaxrsasize = godebug.New("tlsmaxrsasize") // [UTLS] unused
 
 func checkKeySize(n int) (max int, ok bool) {
-	if v := tlsmaxrsasize.Value(); v != "" {
-		if max, err := strconv.Atoi(v); err == nil {
-			if (n <= max) != (n <= defaultMaxRSAKeySize) {
-				tlsmaxrsasize.IncNonDefault()
-			}
-			return max, n <= max
-		}
-	}
+	// [UTLS SECTION BEGIN]
+	// Disabled unsupported godebug packages
+	// if v := tlsmaxrsasize.Value(); v != "" {
+	// 	if max, err := strconv.Atoi(v); err == nil {
+	// 		if (n <= max) != (n <= defaultMaxRSAKeySize) {
+	// 			tlsmaxrsasize.IncNonDefault()
+	// 		}
+	// 		return max, n <= max
+	// 	}
+	// }
+	// [UTLS SECTION END]
 	return defaultMaxRSAKeySize, n <= defaultMaxRSAKeySize
 }
 
@@ -1115,11 +1211,23 @@ func (c *Conn) verifyServerCertificate(certificates [][]byte) error {
 		}
 	} else if !c.config.InsecureSkipVerify {
 		opts := x509.VerifyOptions{
-			Roots:         c.config.RootCAs,
-			CurrentTime:   c.config.time(),
-			DNSName:       c.config.ServerName,
+			Roots:       c.config.RootCAs,
+			CurrentTime: c.config.time(),
+			// DNSName:       c.config.ServerName,  // [UTLS]
 			Intermediates: x509.NewCertPool(),
 		}
+
+		// [UTLS SECTION BEGIN]
+		if c.config.InsecureSkipTimeVerify {
+			opts.CurrentTime = certs[0].NotAfter
+		}
+
+		if len(c.config.InsecureServerNameToVerify) == 0 {
+			opts.DNSName = c.config.ServerName
+		} else if c.config.InsecureServerNameToVerify != "*" {
+			opts.DNSName = c.config.InsecureServerNameToVerify
+		}
+		// [UTLS SECTION END]
 
 		for _, cert := range certs[1:] {
 			opts.Intermediates.AddCert(cert)
