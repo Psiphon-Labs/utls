@@ -31,9 +31,10 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"errors"
-	"internal/byteorder"
 
 	"golang.org/x/crypto/sha3"
+
+	"github.com/Psiphon-Labs/utls/byteorder"
 )
 
 const (
