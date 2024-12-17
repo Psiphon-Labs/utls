@@ -42,11 +42,16 @@ import (
 // reference connection will always change.
 
 var (
-	update       = flag.Bool("update", false, "update golden files on failure")
-	keyFile      = flag.String("keylog", "", "destination file for KeyLogWriter")
-	bogoMode     = flag.Bool("bogo-mode", false, "Enabled bogo shim mode, ignore everything else")
-	bogoFilter   = flag.String("bogo-filter", "", "BoGo test filter")
-	bogoLocalDir = flag.String("bogo-local-dir", "", "Local BoGo to use, instead of fetching from source")
+	update  = flag.Bool("update", false, "update golden files on failure")
+	keyFile = flag.String("keylog", "", "destination file for KeyLogWriter")
+
+	// [UTLS SECTION BEGIN]
+	// Boring is not supported
+	// bogoMode     = flag.Bool("bogo-mode", false, "Enabled bogo shim mode, ignore everything else")
+	// bogoFilter   = flag.String("bogo-filter", "", "BoGo test filter")
+	// bogoLocalDir = flag.String("bogo-local-dir", "", "Local BoGo to use, instead of fetching from source")
+	// [UTLS SECTION END]
+
 )
 
 func runTestAndUpdateIfNeeded(t *testing.T, name string, run func(t *testing.T, update bool), wait bool) {
@@ -404,17 +409,23 @@ func TestMain(m *testing.M) {
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", os.Args)
 		flag.PrintDefaults()
-		if *bogoMode {
-			os.Exit(89)
-		}
+		// [UTLS SECTION BEGIN]
+		// Boring is not supported
+		// if *bogoMode {
+		// 	os.Exit(89)
+		// }
+		// [UTLS SECTION END]
 	}
 
 	flag.Parse()
 
-	if *bogoMode {
-		bogoShim()
-		os.Exit(0)
-	}
+	// [UTLS SECTION BEGIN]
+	// Boring is not supported
+	// if *bogoMode {
+	// 	bogoShim()
+	// 	os.Exit(0)
+	// }
+	// [UTLS SECTION END]
 
 	os.Exit(runMain(m))
 }
