@@ -2626,14 +2626,17 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		return err
 	}
 
-	privateHello, keyShareKeys, ech, err := uconn.makeClientHelloForApplyPreset()
+	privateHello, ech, err := uconn.makeClientHelloForApplyPreset()
 	if err != nil {
 		return err
 	}
 
 	uconn.HandshakeState.Hello = privateHello.getPublicPtr()
-	uconn.HandshakeState.State13.KeyShareKeys = keyShareKeys.toPublic()
 	uconn.echContext = ech
+
+	if uconn.HandshakeState.State13.KeyShareKeys == nil {
+		uconn.HandshakeState.State13.KeyShareKeys = NewPubKeySharePrivateKeys()
+	}
 
 	hello := uconn.HandshakeState.Hello
 
@@ -2723,7 +2726,6 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 				}
 			}
 		case *KeyShareExtension:
-			keyShareKeys := NewPubKeySharePrivateKeys()
 			for i := range ext.KeyShares {
 				curveID := ext.KeyShares[i].Group
 				if isGREASEUint16(uint16(curveID)) { // just in case the user set a GREASE value instead of unGREASEd
@@ -2731,6 +2733,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					continue
 				}
 				if len(ext.KeyShares[i].Data) > 1 {
+					// KeyShares is already calculated.
 					continue
 				}
 
@@ -2738,7 +2741,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 				// this section is where key_share extension values are derived.
 				// The logic closely follows handshake_client.go/makeClientHello.
 				if curveID == x25519Kyber768Draft00 {
-					keyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), X25519)
+					uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), X25519)
 					if err != nil {
 						return fmt.Errorf("generateECDHEKey failed %w", err)
 					}
@@ -2746,28 +2749,26 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					if _, err := io.ReadFull(uconn.config.rand(), seed); err != nil {
 						return fmt.Errorf("read seed failed %w", err)
 					}
-					keyShareKeys.Kyber[curveID], err = mlkem768.NewKeyFromSeed(seed)
+					uconn.HandshakeState.State13.KeyShareKeys.Kyber[curveID], err = mlkem768.NewKeyFromSeed(seed)
 					if err != nil {
 						return fmt.Errorf("mlkem768.NewKeyFromSeed failed %w", err)
 					}
 
-					ext.KeyShares[i].Data = append(keyShareKeys.Ecdhe[curveID].PublicKey().Bytes(),
-						keyShareKeys.Kyber[curveID].EncapsulationKey()...)
+					ext.KeyShares[i].Data = append(uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID].PublicKey().Bytes(),
+						uconn.HandshakeState.State13.KeyShareKeys.Kyber[curveID].EncapsulationKey()...)
 
 				} else {
 					if _, ok := curveForCurveID(curveID); !ok {
 						return fmt.Errorf("unsupported Curve in KeyShareExtension: %v", curveID)
 					}
-					keyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), curveID)
+					uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID], err = generateECDHEKey(uconn.config.rand(), curveID)
 					if err != nil {
 						return fmt.Errorf("generateECDHEKey failed %w", err)
 					}
 
-					ext.KeyShares[i].Data = keyShareKeys.Ecdhe[curveID].PublicKey().Bytes()
+					ext.KeyShares[i].Data = uconn.HandshakeState.State13.KeyShareKeys.Ecdhe[curveID].PublicKey().Bytes()
 				}
 			}
-
-			uconn.HandshakeState.State13.KeyShareKeys = keyShareKeys
 
 		case *SupportedVersionsExtension:
 			for i := range ext.Versions {

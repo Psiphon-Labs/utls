@@ -186,7 +186,7 @@ func (hs *clientHandshakeStateTLS13) utlsReadServerParameters(encryptedExtension
 // makeClientHelloForApplyPreset is the UTLS version of handshake_client.go/(*Conn)makeClientHello.
 // This function is constructed by copying makeClientHello (including the UTLS modifications) and
 // disabling key_share value and quic transport parameters.
-func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivateKeys, *echContext, error) {
+func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *echContext, error) {
 	config := c.config
 
 	// [UTLS SECTION START]
@@ -194,25 +194,25 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 	// 	return nil, nil, nil, errors.New("tls: either ServerName or InsecureSkipVerify must be specified in the tls.Config")
 	// }
 	if len(config.ServerName) == 0 && !config.InsecureSkipVerify && len(config.InsecureServerNameToVerify) == 0 {
-		return nil, nil, nil, errors.New("tls: at least one of ServerName, InsecureSkipVerify or InsecureServerNameToVerify must be specified in the tls.Config")
+		return nil, nil, errors.New("tls: at least one of ServerName, InsecureSkipVerify or InsecureServerNameToVerify must be specified in the tls.Config")
 	}
 	// [UTLS SECTION END]
 
 	nextProtosLength := 0
 	for _, proto := range config.NextProtos {
 		if l := len(proto); l == 0 || l > 255 {
-			return nil, nil, nil, errors.New("tls: invalid NextProtos value")
+			return nil, nil, errors.New("tls: invalid NextProtos value")
 		} else {
 			nextProtosLength += 1 + l
 		}
 	}
 	if nextProtosLength > 0xffff {
-		return nil, nil, nil, errors.New("tls: NextProtos values too large")
+		return nil, nil, errors.New("tls: NextProtos values too large")
 	}
 
 	supportedVersions := config.supportedVersions(roleClient)
 	if len(supportedVersions) == 0 {
-		return nil, nil, nil, errors.New("tls: no supported versions satisfy MinVersion and MaxVersion")
+		return nil, nil, errors.New("tls: no supported versions satisfy MinVersion and MaxVersion")
 	}
 	maxVersion := config.maxSupportedVersion(roleClient)
 
@@ -264,7 +264,7 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 
 	_, err := io.ReadFull(config.rand(), hello.random)
 	if err != nil {
-		return nil, nil, nil, errors.New("tls: short read from Rand: " + err.Error())
+		return nil, nil, errors.New("tls: short read from Rand: " + err.Error())
 	}
 
 	// A random session ID is used to detect when the server accepted a ticket
@@ -275,7 +275,7 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 	if c.quic == nil {
 		hello.sessionId = make([]byte, 32)
 		if _, err := io.ReadFull(config.rand(), hello.sessionId); err != nil {
-			return nil, nil, nil, errors.New("tls: short read from Rand: " + err.Error())
+			return nil, nil, errors.New("tls: short read from Rand: " + err.Error())
 		}
 	}
 
@@ -286,7 +286,9 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 		hello.supportedSignatureAlgorithms = testingOnlyForceClientHelloSignatureAlgorithms
 	}
 
-	var keyShareKeys *keySharePrivateKeys
+	// [UTLS]
+	// var keyShareKeys *keySharePrivateKeys
+
 	if hello.supportedVersions[0] == VersionTLS13 {
 		// Reset the list of ciphers when the client only supports TLS 1.3.
 		if len(hello.supportedVersions) == 1 {
@@ -399,18 +401,18 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 	var ech *echContext
 	if c.config.EncryptedClientHelloConfigList != nil {
 		if c.config.MinVersion != 0 && c.config.MinVersion < VersionTLS13 {
-			return nil, nil, nil, errors.New("tls: MinVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
+			return nil, nil, errors.New("tls: MinVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
 		}
 		if c.config.MaxVersion != 0 && c.config.MaxVersion <= VersionTLS12 {
-			return nil, nil, nil, errors.New("tls: MaxVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
+			return nil, nil, errors.New("tls: MaxVersion must be >= VersionTLS13 if EncryptedClientHelloConfigList is populated")
 		}
 		echConfigs, err := parseECHConfigList(c.config.EncryptedClientHelloConfigList)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		echConfig := pickECHConfig(echConfigs)
 		if echConfig == nil {
-			return nil, nil, nil, errors.New("tls: EncryptedClientHelloConfigList contains no valid configs")
+			return nil, nil, errors.New("tls: EncryptedClientHelloConfigList contains no valid configs")
 		}
 		ech = &echContext{config: echConfig}
 		hello.encryptedClientHello = []byte{1} // indicate inner hello
@@ -424,19 +426,19 @@ func (c *Conn) makeClientHelloForApplyPreset() (*clientHelloMsg, *keySharePrivat
 
 		echPK, err := hpke.ParseHPKEPublicKey(ech.config.KemID, ech.config.PublicKey)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		suite, err := pickECHCipherSuite(ech.config.SymmetricCipherSuite)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 		ech.kdfID, ech.aeadID = suite.KDFID, suite.AEADID
 		info := append([]byte("tls ech\x00"), ech.config.raw...)
 		ech.encapsulatedKey, ech.hpkeContext, err = hpke.SetupSender(ech.config.KemID, suite.KDFID, suite.AEADID, echPK, info)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 	}
 
-	return hello, keyShareKeys, ech, nil
+	return hello, ech, nil
 }
