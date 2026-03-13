@@ -18,7 +18,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/refraction-networking/utls/internal/byteorder"
+	"github.com/Psiphon-Labs/utls/internal/byteorder"
 )
 
 // serverHandshakeState contains details of a server handshake in progress.
