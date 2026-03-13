@@ -55,6 +55,13 @@ type keySharePrivateKeys struct {
 	ecdhe      *ecdh.PrivateKey
 	mlkem      *mlkem.DecapsulationKey768
 	mlkemEcdhe *ecdh.PrivateKey // [uTLS] seperate ecdhe key for pq keyshare in line with Chrome, instead of reusing ecdhe key like stdlib
+
+	// [uTLS] ecdheFallback stores private keys for additional (non-preferred)
+	// key shares sent in the ClientHello. When a spec advertises multiple
+	// classical key shares (e.g. X25519 + P256 in Firefox profiles), only the
+	// first is stored in ecdhe. If the server selects a different curve,
+	// establishHandshakeKeys falls back to this map.
+	ecdheFallback map[CurveID]*ecdh.PrivateKey
 }
 
 const x25519PublicKeySize = 32

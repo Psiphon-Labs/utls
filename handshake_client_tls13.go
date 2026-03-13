@@ -609,7 +609,19 @@ func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 		}
 		ecdhePeerData = hs.serverHello.serverShare.data[:x25519PublicKeySize]
 	}
-	sharedKey, err := getSharedKey(ecdhePeerData, hs.keyShareKeys.ecdhe)
+	// [Psiphon] Select the correct ECDHE private key for the server's chosen
+	// curve. When the spec advertises multiple classical key shares only the
+	// preferred key is in hs.keyShareKeys.ecdhe. If the server selects a
+	// different curve, use the fallback map.
+	ecdhePeerKey := hs.keyShareKeys.ecdhe
+	serverGroup := hs.serverHello.serverShare.group
+	if serverGroup != hs.keyShareKeys.curveID &&
+		serverGroup != X25519MLKEM768 && serverGroup != X25519Kyber768Draft00 {
+		if fallback, ok := hs.keyShareKeys.ecdheFallback[serverGroup]; ok {
+			ecdhePeerKey = fallback
+		}
+	}
+	sharedKey, err := getSharedKey(ecdhePeerData, ecdhePeerKey)
 	// [uTLS] SECTION END
 	if err != nil {
 		c.sendAlert(alertIllegalParameter)
