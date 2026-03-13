@@ -180,6 +180,15 @@ func (uconn *UConn) uLoadSession() error {
 			return err
 		}
 		if session.version == VersionTLS12 {
+			// [Psiphon] Should not attempt to resume a session ticket if the
+			// sessionTicketExt is nil.
+			if uconn.sessionController.sessionTicketExt == nil {
+				return nil
+			}
+			if mutualCipherSuite(hello.cipherSuites, session.cipherSuite) == nil {
+				// The TLS 1.2 cipher suite must match the resumed session.
+				return nil
+			}
 			// We use the session ticket extension for tls 1.2 session resumption
 			uconn.sessionController.initSessionTicketExt(session, hello.sessionTicket)
 			uconn.sessionController.setSessionTicketToUConn()
