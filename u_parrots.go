@@ -3359,7 +3359,8 @@ func generateRandomizedSpec(
 	points := SupportedPointsExtension{SupportedPoints: []byte{pointFormatUncompressed}}
 
 	curveIDs := []CurveID{}
-	if r.FlipWeightedCoin(id.Weights.CurveIDs_Append_X25519) && p.TLSVersMax == VersionTLS13 {
+	includeMLKEM := r.FlipWeightedCoin(id.Weights.CurveIDs_Append_X25519) && p.TLSVersMax == VersionTLS13
+	if includeMLKEM {
 		curveIDs = append(curveIDs, X25519MLKEM768)
 	}
 	if r.FlipWeightedCoin(id.Weights.CurveIDs_Append_X25519) || p.TLSVersMax == VersionTLS13 {
@@ -3419,7 +3420,10 @@ func generateRandomizedSpec(
 			if r.FlipWeightedCoin(id.Weights.KeyShare_Append_RandomGroups) {
 				ks.KeyShares = append(ks.KeyShares, KeyShare{Group: CurveP256})
 			}
-			if r.FlipWeightedCoin(id.Weights.KeyShare_Append_RandomGroups) {
+			// [Psiphon] FIX: Always include X25519MLKEM768 key share when the curve is in
+			// supported_curves, because the TLS 1.3 HRR handler does not
+			// support generating hybrid key shares on demand.
+			if includeMLKEM {
 				ks.KeyShares = append([]KeyShare{{Group: X25519MLKEM768}}, ks.KeyShares...)
 			}
 		}
