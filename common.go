@@ -235,7 +235,7 @@ const (
 // include downgrade canaries even if it's using its highers supported version.
 var testingOnlyForceDowngradeCanary bool
 
-// ConnectionMetrics contains basic metrics about the connection.
+// [Psiphon] ConnectionMetrics contains basic metrics about the connection.
 type ConnectionMetrics struct {
 	// ClientSentTicket is true if the client has sent a TLS 1.2 session ticket
 	// or a TLS 1.3 PSK in the ClientHello successfully.
@@ -718,7 +718,7 @@ type Config struct {
 	// this behavior at their own discretion.
 	OmitEmptyPsk bool // [uTLS]
 
-	// AlwaysIncludePSK controls whether the PreSharedKey extension is always
+	// [Psiphon] AlwaysIncludePSK controls whether the PreSharedKey extension is always
 	// included in the ClientHello if there is a cached session, even if not specified
 	// in the selected ClientHelloSpec. If there are no cached sessions, OmitEmptyPsk
 	// controls whether the extension is omitted.

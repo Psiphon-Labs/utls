@@ -3015,7 +3015,7 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 		return err
 	}
 
-	// Add PSK extension if not specified in the spec.
+	// [Psiphon] Add PSK extension if not specified in the spec.
 	if uconn.config.AlwaysIncludePSK {
 		supportsPSK := uconn.config.MaxVersion >= VersionTLS13
 		if supportsPSK {

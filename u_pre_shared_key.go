@@ -89,7 +89,7 @@ type PreSharedKeyExtension interface {
 	// Its purpose is to update the binders of PSK (Pre-Shared Key) identities.
 	PatchBuiltHello(hello *PubClientHelloMsg) error
 
-	// UpdateOnHRR is called when a HelloRetryRequest is received and PSK identities
+	// [Psiphon] UpdateOnHRR is called when a HelloRetryRequest is received and PSK identities
 	// need to be reprocessed. It updates the session, cipher suite, obfuscated ticket
 	// age, and stores the previous ClientHello hash for correct transcript reconstruction
 	// in PatchBuiltHello.
@@ -148,7 +148,7 @@ type UtlsPreSharedKeyExtension struct {
 	// Deprecated: Set OmitEmptyPsk in Config instead.
 	OmitEmptyPsk bool
 
-	// used only for HRR-based recalculation of binders
+	// [Psiphon] Used only for HRR-based recalculation of binders.
 	prevClientHelloHash []byte
 	serverHello         *serverHelloMsg
 }

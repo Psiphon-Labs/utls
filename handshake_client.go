@@ -435,10 +435,12 @@ func (c *Conn) loadSession(hello *clientHelloMsg) (
 	}
 	session = cs.session
 
-	// Shallow copy the session to prevent a race condition where
-	// SessionTicketExtension.InitializeByUtls mutates the shared cache entry.
+	// [Psiphon]
+	// Mitigate a race condition where utls.SessionTicketExtension.InitializeByUtls
+	// mutates the shared cache entry. Only a shallow copy is required.
 	sessionCopy := *session
 	session = &sessionCopy
+	// [Psiphon]
 
 	// Check that version used for the previous session is still valid.
 	versOk := false

@@ -434,11 +434,13 @@ func (hs *clientHandshakeStateTLS13) processHelloRetryRequest() error {
 				return err
 			}
 
+			// [Psiphon] Support PSK binder reprocessing on HelloRetryRequest.
 			if len(hs.hello.pskIdentities) > 0 {
 				for _, ext := range hs.uconn.Extensions {
 					if psk, ok := ext.(PreSharedKeyExtension); ok {
 						if err := psk.UpdateOnHRR(chHash, hs, c.config.time()); err != nil {
-							// Graceful degradation: clear PSK and continue without resumption.
+							// [Psiphon] Graceful degradation: clear PSK and continue
+							// without resumption.
 							hs.uconn.HandshakeState.Hello.PskIdentities = nil
 							hs.uconn.HandshakeState.Hello.PskBinders = nil
 						} else {

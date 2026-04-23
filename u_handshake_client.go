@@ -12,11 +12,11 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/Psiphon-Labs/utls/internal/fips140tls"
 	"github.com/Psiphon-Labs/utls/internal/hpke"
 	"github.com/Psiphon-Labs/utls/internal/tls13"
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 // This function is called by (*clientHandshakeStateTLS13).readServerCertificate()
@@ -494,7 +494,7 @@ func (c *UConn) clientHandshake(ctx context.Context) (err error) {
 		return err
 	}
 
-	// Client sent a session ticket or PSK.
+	// [Psiphon] Client sent a session ticket or PSK.
 	if session != nil {
 		c.clientSentTicket = true
 	}

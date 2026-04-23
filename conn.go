@@ -44,8 +44,9 @@ type Conn struct {
 	// handshakes counts the number of handshakes performed on the
 	// connection so far. If renegotiation is disabled then this is either
 	// zero or one.
-	handshakes       int
-	extMasterSecret  bool
+	handshakes      int
+	extMasterSecret bool
+	// [Psiphon]
 	clientSentTicket bool // whether the client sent a session ticket or a PSK in the Client Hello
 	didResume        bool // whether this connection was a session resumption
 	didHRR           bool // whether a HelloRetryRequest was sent/received
@@ -1701,7 +1702,7 @@ func (c *Conn) VerifyHostname(host string) error {
 	return c.peerCertificates[0].VerifyHostname(host)
 }
 
-// ConnectionMetrics returns basic metrics about the connection.
+// [Psiphon] ConnectionMetrics returns basic metrics about the connection.
 func (c *Conn) ConnectionMetrics() ConnectionMetrics {
 	c.handshakeMutex.Lock()
 	defer c.handshakeMutex.Unlock()
