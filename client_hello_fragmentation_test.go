@@ -199,9 +199,10 @@ func TestWriteHandshakeRecordFragmentsStandardClientHello(t *testing.T) {
 func TestClientHelloFragmentationHandshake(t *testing.T) {
 	const serverName = "example.org"
 	tests := []struct {
-		name      string
-		version   uint16
-		newClient func(net.Conn, *Config) clientHelloFragmentationHandshakeClient
+		name                string
+		version             uint16
+		fragmentClientHello ClientHelloFragFunc
+		newClient           func(net.Conn, *Config) clientHelloFragmentationHandshakeClient
 	}{
 		{
 			name:    "StandardTLS12",
@@ -224,6 +225,28 @@ func TestClientHelloFragmentationHandshake(t *testing.T) {
 				return UClient(conn, config, HelloGolang)
 			},
 		},
+		{
+			name:                "UTLSChrome120TLS13",
+			version:             VersionTLS13,
+			fragmentClientHello: testClientHelloSNIFragmentOffset,
+			newClient: func(conn net.Conn, config *Config) clientHelloFragmentationHandshakeClient {
+				return UClient(conn, config, HelloChrome_120)
+			},
+		},
+		{
+			name:    "UTLSFirefox120TLS13",
+			version: VersionTLS13,
+			newClient: func(conn net.Conn, config *Config) clientHelloFragmentationHandshakeClient {
+				return UClient(conn, config, HelloFirefox_120)
+			},
+		},
+		{
+			name:    "UTLSSafari16TLS13",
+			version: VersionTLS13,
+			newClient: func(conn net.Conn, config *Config) clientHelloFragmentationHandshakeClient {
+				return UClient(conn, config, HelloSafari_16_0)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -233,7 +256,11 @@ func TestClientHelloFragmentationHandshake(t *testing.T) {
 			clientConfig.InsecureSkipVerify = true
 			clientConfig.MinVersion = tt.version
 			clientConfig.MaxVersion = tt.version
-			clientConfig.FragmentClientHello = testClientHelloFragmentOffset
+			fragmentClientHello := tt.fragmentClientHello
+			if fragmentClientHello == nil {
+				fragmentClientHello = testClientHelloFragmentOffset
+			}
+			clientConfig.FragmentClientHello = fragmentClientHello
 
 			serverConfig := testConfig.Clone()
 			serverConfig.MinVersion = tt.version
@@ -260,67 +287,95 @@ func TestClientHelloFragmentationHandshake(t *testing.T) {
 			testClientHelloFragmentedMetric(t, client.ConnectionMetrics(), true)
 
 			records := testTLSRecords(t, testFirstRecordedClientFlow(t, recordingClientConn))
-			testFragmentedClientHello(t, records)
+			testFragmentedClientHelloAtOffset(t, records, fragmentClientHello)
 		})
 	}
 }
 
 func TestClientHelloFragmentationHelloRetryRequest(t *testing.T) {
 	const serverName = "example.org"
-	callbackCalls := 0
 
-	clientConfig := testConfig.Clone()
-	clientConfig.ServerName = serverName
-	clientConfig.InsecureSkipVerify = true
-	clientConfig.MinVersion = VersionTLS13
-	clientConfig.MaxVersion = VersionTLS13
-	clientConfig.CurvePreferences = []CurveID{X25519, CurveP256}
-	clientConfig.FragmentClientHello = func(clientHello []byte) int {
-		callbackCalls++
-		return testClientHelloFragmentOffset(clientHello)
-	}
-
-	serverConfig := testConfig.Clone()
-	serverConfig.MinVersion = VersionTLS13
-	serverConfig.MaxVersion = VersionTLS13
-	serverConfig.CurvePreferences = []CurveID{CurveP256}
-
-	clientConn, serverConn := localPipe(t)
-	recordingClientConn := &recordingConn{Conn: clientConn}
-	client := Client(recordingClientConn, clientConfig)
-	server := Server(serverConn, serverConfig)
-	defer client.Close()
-	defer server.Close()
-
-	serverErr := make(chan error, 1)
-	go func() {
-		serverErr <- server.Handshake()
-	}()
-
-	if err := client.Handshake(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-serverErr; err != nil {
-		t.Fatal(err)
-	}
-	if !client.ConnectionState().testingOnlyDidHRR {
-		t.Fatal("expected HelloRetryRequest")
+	tests := []struct {
+		name                string
+		fallbackSecondHello bool
+		wantRecordCounts    []int
+	}{
+		{
+			name:             "fragment both ClientHellos",
+			wantRecordCounts: []int{2, 2},
+		},
+		{
+			name:                "fallback for second ClientHello",
+			fallbackSecondHello: true,
+			wantRecordCounts:    []int{2, 1},
+		},
 	}
 
-	clientHellos := testRecordedClientHellos(t, recordingClientConn)
-	if len(clientHellos) != 2 {
-		t.Fatalf("unexpected ClientHello count: got %d, want 2", len(clientHellos))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			callbackCalls := 0
+
+			clientConfig := testConfig.Clone()
+			clientConfig.ServerName = serverName
+			clientConfig.InsecureSkipVerify = true
+			clientConfig.MinVersion = VersionTLS13
+			clientConfig.MaxVersion = VersionTLS13
+			clientConfig.CurvePreferences = []CurveID{X25519, CurveP256}
+			clientConfig.FragmentClientHello = func(clientHello []byte) int {
+				callbackCalls++
+				if tt.fallbackSecondHello && callbackCalls == 2 {
+					return 0
+				}
+				return testClientHelloFragmentOffset(clientHello)
+			}
+
+			serverConfig := testConfig.Clone()
+			serverConfig.MinVersion = VersionTLS13
+			serverConfig.MaxVersion = VersionTLS13
+			serverConfig.CurvePreferences = []CurveID{CurveP256}
+
+			clientConn, serverConn := localPipe(t)
+			recordingClientConn := &recordingConn{Conn: clientConn}
+			client := Client(recordingClientConn, clientConfig)
+			server := Server(serverConn, serverConfig)
+			defer client.Close()
+			defer server.Close()
+
+			serverErr := make(chan error, 1)
+			go func() {
+				serverErr <- server.Handshake()
+			}()
+
+			if err := client.Handshake(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-serverErr; err != nil {
+				t.Fatal(err)
+			}
+			if !client.ConnectionState().testingOnlyDidHRR {
+				t.Fatal("expected HelloRetryRequest")
+			}
+
+			clientHellos := testRecordedClientHellos(t, recordingClientConn)
+			if len(clientHellos) != len(tt.wantRecordCounts) {
+				t.Fatalf("unexpected ClientHello count: got %d, want %d",
+					len(clientHellos), len(tt.wantRecordCounts))
+			}
+			for i, wantRecordCount := range tt.wantRecordCounts {
+				if len(clientHellos[i]) != wantRecordCount {
+					t.Fatalf("ClientHello %d record count: got %d, want %d",
+						i+1, len(clientHellos[i]), wantRecordCount)
+				}
+				if wantRecordCount == 2 {
+					testFragmentedClientHello(t, clientHellos[i])
+				}
+			}
+			if callbackCalls != 2 {
+				t.Fatalf("unexpected callback count: got %d, want 2", callbackCalls)
+			}
+			testClientHelloFragmentedMetric(t, client.ConnectionMetrics(), true)
+		})
 	}
-	for i, records := range clientHellos {
-		if len(records) != 2 {
-			t.Fatalf("ClientHello %d record count: got %d, want 2", i+1, len(records))
-		}
-		testFragmentedClientHello(t, records)
-	}
-	if callbackCalls != 2 {
-		t.Fatalf("unexpected callback count: got %d, want 2", callbackCalls)
-	}
-	testClientHelloFragmentedMetric(t, client.ConnectionMetrics(), true)
 }
 
 func TestClientHelloFragmentationHandshakeFallback(t *testing.T) {
@@ -597,7 +652,20 @@ func testClientHelloFragmentOffset(clientHello []byte) int {
 	return len(clientHello) / 2
 }
 
+func testClientHelloSNIFragmentOffset(clientHello []byte) int {
+	const serverNamePrefix = "example"
+	serverNameOffset := bytes.Index(clientHello, []byte("example.org"))
+	if serverNameOffset < 0 {
+		return 0
+	}
+	return serverNameOffset + len(serverNamePrefix)
+}
+
 func testFragmentedClientHello(t *testing.T, writes [][]byte) []byte {
+	return testFragmentedClientHelloAtOffset(t, writes, testClientHelloFragmentOffset)
+}
+
+func testFragmentedClientHelloAtOffset(t *testing.T, writes [][]byte, fragmentOffset ClientHelloFragFunc) []byte {
 	t.Helper()
 	if len(writes) != 2 {
 		t.Fatalf("unexpected write count: got %d, want 2", len(writes))
@@ -606,7 +674,7 @@ func testFragmentedClientHello(t *testing.T, writes [][]byte) []byte {
 	payload1 := testTLSRecordPayload(t, writes[0])
 	payload2 := testTLSRecordPayload(t, writes[1])
 	data := append(append([]byte{}, payload1...), payload2...)
-	split := testClientHelloFragmentOffset(data)
+	split := fragmentOffset(data)
 	if split != len(payload1) {
 		t.Fatalf("unexpected split offset: got %d, want %d", len(payload1), split)
 	}
